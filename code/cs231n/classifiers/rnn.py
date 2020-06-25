@@ -137,7 +137,43 @@ class CaptioningRNN(object):
         # defined above to store loss and gradients; grads[k] should give the      #
         # gradients for self.params[k].                                            #
         ############################################################################
-        pass
+        # Forward pass
+        # (1) Use `affine_forward` not `temporal_affine_forward`
+        hidden_init, cache_init = affine_forward(features, W_proj, b_proj)
+
+        # (2)
+        captions_in_init, cache_embed = word_embedding_forward(captions_in, W_embed)
+
+        # (3)
+        if self.cell_type == 'rnn':
+            hidden_rnn, cache_rnn = rnn_forward(captions_in_init, hidden_init, Wx, Wh, b)
+
+        else:
+            hidden_rnn, cache_rnn = lstm_forward(captions_in_init, hidden_init, Wx, Wh, b)
+
+        # (4)
+        scores, cache_scores = temporal_affine_forward(hidden_rnn, W_vocab, b_vocab)
+
+        # (5)
+        loss, dscores = temporal_softmax_loss(scores, captions_out, mask)
+
+        # Backward pass
+        # (4)
+        dhidden_rnn, grads['W_vocab'], grads['b_vocab'] = temporal_affine_backward(dscores, cache_scores)
+
+        # (3)
+        if self.cell_type == 'rnn':
+            dcaptions_in_init, dhidden_init, grads['Wx'], grads['Wh'], grads['b'] = rnn_backward(dhidden_rnn, cache_rnn)
+
+        else:
+            dcaptions_in_init, dhidden_init, grads['Wx'], grads['Wh'], grads['b'] = lstm_backward(dhidden_rnn, cache_rnn)
+
+        # (2)
+        grads['W_embed'] = word_embedding_backward(dcaptions_in_init, cache_embed)
+
+        # (1)
+        dfeatures, grads['W_proj'], grads['b_proj'] = affine_backward(dhidden_init, cache_init)
+
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -199,7 +235,21 @@ class CaptioningRNN(object):
         # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
         # a loop.                                                                 #
         ###########################################################################
-        pass
+        h0 = features.dot(W_proj) + b_proj
+        c0 = np.zeros(h0.shape)
+        V, W = W_embed.shape
+        x = np.ones((N, W)) * W_embed[self._start]
+        for i in range(max_length):
+            if self.cell_type == 'rnn':
+               next_h, _ = rnn_step_forward(x, h0, Wx, Wh, b)
+            else:
+               next_h, next_c, _ = lstm_step_forward(x, h0, c0, Wx, Wh, b)
+               c0 = next_c
+            out = next_h.dot(W_vocab) + b_vocab
+            max_indices = out.argmax(axis=1)
+            captions[:,i] = max_indices
+            x = W_embed[max_indices]
+            h0 = next_h
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
